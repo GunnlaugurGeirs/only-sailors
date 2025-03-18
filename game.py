@@ -1,6 +1,7 @@
 import threading
 import time
 from config import read_config
+from memory_utils import get_pokemon_name, get_first_pokemon_info
 from queue import Queue
 from pyboy import PyBoy
 
@@ -17,7 +18,7 @@ key_map = {
 
 class GameInstance:
     def __init__(self, rom_path):
-        self.pyboy = PyBoy(rom_path)
+        self.pyboy = PyBoy(gamerom=rom_path, sound_volume=0)
         self.command_queue = Queue()
         self.input_thread = None
         self.output_thread = None
@@ -77,6 +78,8 @@ class GameInstance:
         while True:
             with self.image_lock: 
                 self.image = self.pyboy.screen.image.copy()
+                print(get_pokemon_name(self.pyboy))
+                print(get_first_pokemon_info(self.pyboy))
             time.sleep(read_config("Settings", "capture_time", default=5, value_type=int))
 
     def get_output(self):
