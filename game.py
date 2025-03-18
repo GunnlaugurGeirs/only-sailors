@@ -1,4 +1,5 @@
 import threading
+import time
 from config import read_config
 from queue import Queue
 from pyboy import PyBoy
@@ -14,12 +15,26 @@ key_map = {
     "SELECT": "select",
 }
 
-
 class GameInstance:
     def __init__(self, rom_path):
         self.pyboy = PyBoy(rom_path)
         self.command_queue = Queue()
         self.input_thread = None
+        self.output_thread = None
+        self.image = None
+        self.image_lock = threading.Lock()
+
+    def run(self):
+        self.start_input_thread()
+        self.start_output_thread()
+        while self.pyboy.tick():
+            if not self.command_queue.empty():
+                command = self.command_queue.get()
+                if command == "EXIT":
+                    break
+                self.pyboy.button(command)
+
+        self.pyboy.stop()
 
     # TODO: remove CLI option when Agent is implemented
     def get_inputs(self):
@@ -31,6 +46,9 @@ class GameInstance:
             "Enter command (UP, DOWN, LEFT, RIGHT, A, B, START, SELECT) or 'exit' to quit: "
         ).upper()
 
+        self.command(command)
+
+    def command(self, command):
         if command == "EXIT":
             self.command_queue.put("EXIT")
             return
@@ -50,19 +68,19 @@ class GameInstance:
                 target=self.get_input, args=(), daemon=True
             )
         self.input_thread.start()
+    
+    def start_output_thread(self):
+        self.output_thread = threading.Thread(target=self.capture_image, daemon=True)
+        self.output_thread.start()
 
-    def run(self):
-        self.start_input_thread()
+    def capture_image(self):
+        while True:
+            with self.image_lock: 
+                self.image = self.pyboy.screen.image.copy()
+            time.sleep(read_config("Settings", "capture_time", default=5, value_type=int))
 
-        while self.pyboy.tick():
-            if not self.command_queue.empty():
-                command = self.command_queue.get()
-                if command == "EXIT":
-                    break
-                self.pyboy.button(command)
-
-        self.pyboy.stop()
-
+    def get_output(self):
+        return self.image
 
 if __name__ == "__main__":
     gamefile = read_config("Settings", "gamefile", default="emulation/game.gb")
