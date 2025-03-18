@@ -1,62 +1,70 @@
 import threading
-import configparser
+from config import read_config
 from queue import Queue
 from pyboy import PyBoy
 
-
 key_map = {
-    'UP': 'up',
-    'DOWN': 'down',
-    'LEFT': 'left',
-    'RIGHT': 'right',
-    'A': 'a',
-    'B': 'b',
-    'START': 'start',
-    'SELECT': 'select',
+    "UP": "up",
+    "DOWN": "down",
+    "LEFT": "left",
+    "RIGHT": "right",
+    "A": "a",
+    "B": "b",
+    "START": "start",
+    "SELECT": "select",
 }
 
-def read_config():
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    
-    # Default to False if 'cli' isn't found in the config file
-    return config.getboolean('Settings', 'cli', fallback=False)
 
-def get_inputs(command_queue):
-    while True:
-        get_input(command_queue)
+class GameInstance:
+    def __init__(self, rom_path):
+        self.pyboy = PyBoy(rom_path)
+        self.command_queue = Queue()
+        self.input_thread = None
 
-def get_input(command_queue=None):
-    command = input("Enter command (UP, DOWN, LEFT, RIGHT, A, B, START, SELECT) or 'exit' to quit: ").upper()
+    # TODO: remove CLI option when Agent is implemented
+    def get_inputs(self):
+        while True:
+            self.get_input()
 
-    if command == 'EXIT':
-        command_queue.put('EXIT')
-        return
+    def get_input(self):
+        command = input(
+            "Enter command (UP, DOWN, LEFT, RIGHT, A, B, START, SELECT) or 'exit' to quit: "
+        ).upper()
 
-    if command in key_map:
-        button = key_map[command]
-        command_queue.put(button)
+        if command == "EXIT":
+            self.command_queue.put("EXIT")
+            return
 
-def start():
-    pyboy = PyBoy('emulation/red.gb')
-    command_queue = Queue()
-    cli = read_config()
+        if command in key_map:
+            button = key_map[command]
+            self.command_queue.put(button)
 
-    if cli:
-        input_thread = threading.Thread(target=get_inputs, args=(command_queue,), daemon=True)
-        input_thread.start()
+    def start_input_thread(self):
+        cli = read_config("Settings", "cli", default=False, value_type=bool)
+        if cli:
+            self.input_thread = threading.Thread(
+                target=self.get_inputs, args=(), daemon=True
+            )
+        else:
+            self.input_thread = threading.Thread(
+                target=self.get_input, args=(), daemon=True
+            )
+        self.input_thread.start()
+
+    def run(self):
+        self.start_input_thread()
+
+        while self.pyboy.tick():
+            if not self.command_queue.empty():
+                command = self.command_queue.get()
+                if command == "EXIT":
+                    break
+                self.pyboy.button(command)
+
+        self.pyboy.stop()
 
 
-    while pyboy.tick():
-        if not command_queue.empty():
-            command = command_queue.get()
-            if command == 'EXIT':
-                break
-            pyboy.button(command)
-        pass
-    pyboy.stop()
-
-
-    
 if __name__ == "__main__":
-    start()
+    gamefile = read_config("Settings", "gamefile", default="emulation/game.gb")
+    game = GameInstance(gamefile)
+    game.run()
