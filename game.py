@@ -1,6 +1,8 @@
 import threading
+import configparser
 from queue import Queue
 from pyboy import PyBoy
+
 
 key_map = {
     'UP': 'up',
@@ -13,23 +15,36 @@ key_map = {
     'SELECT': 'select',
 }
 
-def get_input(command_queue):
+def read_config():
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    
+    # Default to False if 'cli' isn't found in the config file
+    return config.getboolean('Settings', 'cli', fallback=False)
+
+def get_inputs(command_queue):
     while True:
-        command = input("Enter command (UP, DOWN, LEFT, RIGHT, A, B, START, SELECT) or 'exit' to quit: ").upper()
+        get_input(command_queue)
 
-        if command == 'EXIT':
-            command_queue.put('EXIT')
-            break
+def get_input(command_queue=None):
+    command = input("Enter command (UP, DOWN, LEFT, RIGHT, A, B, START, SELECT) or 'exit' to quit: ").upper()
 
-        if command in key_map:
-            button = key_map[command]
-            command_queue.put(button)
+    if command == 'EXIT':
+        command_queue.put('EXIT')
+        return
+
+    if command in key_map:
+        button = key_map[command]
+        command_queue.put(button)
 
 def start():
     pyboy = PyBoy('emulation/red.gb')
     command_queue = Queue()
-    input_thread = threading.Thread(target=get_input, args=(command_queue,), daemon=True)
-    input_thread.start()
+    cli = read_config()
+
+    if cli:
+        input_thread = threading.Thread(target=get_inputs, args=(command_queue,), daemon=True)
+        input_thread.start()
 
 
     while pyboy.tick():
