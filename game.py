@@ -80,7 +80,7 @@ class GameInstance:
             time.sleep(read_config("Settings", "capture_time", default=5, value_type=int))
 
     def get_output(self):
-        return self.image
+        return self.image, self.pyboy.game_wrapper.game_area_collision()
 
 if __name__ == "__main__":
     gamefile = read_config("Settings", "gamefile", default="emulation/game.gb")
