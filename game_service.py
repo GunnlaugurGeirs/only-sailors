@@ -1,4 +1,3 @@
-
 from queue import Queue
 import time
 import threading
@@ -25,6 +24,4 @@ class GameService:
         while True:
             image, collision = self.output_queue.get()
             time.sleep(5)
-
-
     
