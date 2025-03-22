@@ -1,0 +1,6 @@
+numpy==2.0.2
+pillow==11.1.0
+pkg_resources==0.0.0
+pyboy==2.5.1
+PySDL2==0.9.17
+pysdl2-dll==2.32.0
