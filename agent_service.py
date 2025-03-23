@@ -6,79 +6,91 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from PIL import Image
-from transformers import pipeline
-
-# TODO: check CUDA requirements and throw error if CUDA is not available
-
-# Define the pre-prompt (system instruction) that the LLM should always see first.
-PRE_PROMPT = "You are a helpful assistant that is aware of previous conversation context. Please use the context to provide thorough answers."
+from transformers import Gemma3ForConditionalGeneration, AutoProcessor
 
 
-# Initialize FastAPI
-app = FastAPI(title="Conversational Gemma-3-4B-IT Pipeline Service")
+#https://ai.google.dev/gemma/docs/capabilities/function-calling
+
+
+# Read pre-prompt from file
+with open('preprompt.txt', 'r') as file:
+    PRE_PROMPT = file.read().strip()
 
 class ChatPayload(BaseModel):
     text: str
     image: Optional[str] = None  # Base64-encoded image
 
 model_name = "google/gemma-3-4b-it"
-llm_pipeline = pipeline(
-    "image-text-to-text",
-    model=model_name,
-    device="cuda",
-    torch_dtype=torch.bfloat16
-)
+model = Gemma3ForConditionalGeneration.from_pretrained(model_name, device_map="cuda", torch_dtype=torch.bfloat16)
+processor = AutoProcessor.from_pretrained(model_name)
 
-@app.post("/chat")
-async def chat(payload: ChatPayload):
-    conversation_history: List[Dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": PRE_PROMPT}]
-        }
-    ]
+class LLMService:
+    def __init__(self):
+        self.conversation_history: List[Dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": PRE_PROMPT}]
+            }
+        ]
 
-    # If an image is provided, decode it. In this example we only include a placeholder.
-    image_content = None
-    if payload.image:
+    async def handle_chat(self, payload: ChatPayload):
+        image_content = None
+        if payload.image:
+            try:
+                image_data = base64.b64decode(payload.image)
+                img = Image.open(io.BytesIO(image_data))
+                image_content = {"type": "image", "image": img}
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid image data: {e}")
+
+        user_message_content = []
+        if image_content:
+            user_message_content.append(image_content)
+        user_message_content.append({"type": "text", "text": payload.text})
+
+        self.conversation_history.append({
+            "role": "user",
+            "content": user_message_content
+        })
+        
         try:
-            image_data = base64.b64decode(payload.image)
-            img = Image.open(io.BytesIO(image_data)).convert("RGB")
-            # TODO: handle images. This is just a placeholder
-            image_content = {"type": "image", "url": "pixel.png"}
+            inputs = processor.apply_chat_template(
+                self.conversation_history, 
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+                do_pan_and_scan=True
+            ).to(model.device)
+            input_len = inputs["input_ids"].shape[-1]
+            output_ids = model.generate(**inputs, max_new_tokens=2000)
+            output_ids = output_ids[0][input_len:]
+            assistant_response = processor.decode(output_ids,
+                                                  skip_special_tokens=True,
+                                                  return_full_text=False)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid image data: {e}")
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
 
-    # Create a new user message. If there's an image, include it along with the text.
-    user_message_content = []
-    if image_content:
-        user_message_content.append(image_content)
-    # Append the text part.
-    user_message_content.append({"type": "text", "text": payload.text})
+        # TODO: fix conversation history if above code fails
+        assistant_message = {
+            "role": "assistant",
+            "content": [{"type": "text", "text": assistant_response}]
+        }
+        self.conversation_history.append(assistant_message)
+        return assistant_response
 
-    # Append this user message to the conversation history.
-    conversation_history.append({
-        "role": "user",
-        "content": user_message_content
-    })
 
-    try:
-        # Call the LLM pipeline with the entire conversation history.
-        output = llm_pipeline(text=conversation_history, max_new_tokens=2000)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
+LLM_SERVICE = LLMService()
 
-    # Clean up model response and reply
-    assistant_response = output[0].get("generated_text", "")
-    assistant_message = {
-        "role": "assistant",
-        "content": [{"type": "text", "text": assistant_response}]
-    }
-    conversation_history.append(assistant_message)
+# Initialize FastAPI
+APP = FastAPI(title="Conversational Gemma-3-4B-IT Pipeline Service")
 
-    return {"response": assistant_response, "conversation_history": conversation_history}
+
+@APP.post("/chat")
+async def chat(payload: ChatPayload):
+    return await LLM_SERVICE.handle_chat(payload)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(APP, host="0.0.0.0", port=8000)

@@ -1,0 +1,23 @@
+You have access to functions. If you decide to invoke any of the function(s),
+ you MUST put it in the format of
+[func_name1(params_name1=params_value1, params_name2=params_value2...), func_name2(params)]
+
+You SHOULD NOT include any other text in the response if you call a function
+
+[
+  {
+    "name": "get_product_name_by_PID",
+    "description": "Finds the name of a product by its Product ID",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "PID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "PID"
+      ]
+    }
+  }
+]
