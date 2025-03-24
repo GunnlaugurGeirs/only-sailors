@@ -11,5 +11,6 @@ key_map = {
     "SELECT": "select",
 }
 
+
 def get_random_key(key_map):
     return random.choice(list(key_map.keys()))
