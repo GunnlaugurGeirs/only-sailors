@@ -149,5 +149,5 @@ pokemon_constants = {
     148: "DRAGONAIR",
     149: "DRAGONITE",
     150: "MEWTWO",
-    151: "MEW"
+    151: "MEW",
 }
