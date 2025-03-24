@@ -2,15 +2,14 @@ import base64
 import io
 import torch
 import traceback
+import copy
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from PIL import Image
 from transformers import Gemma3ForConditionalGeneration, AutoProcessor
 
-
 #https://ai.google.dev/gemma/docs/capabilities/function-calling
-
 
 # Read pre-prompt from file
 with open('preprompt.txt', 'r') as file:
@@ -26,6 +25,9 @@ processor = AutoProcessor.from_pretrained(model_name)
 
 class LLMService:
     def __init__(self):
+        self.__init_conversation_history()
+    
+    def __init_conversation_history(self):
         self.conversation_history: List[Dict[str, Any]] = [
             {
                 "role": "system",
@@ -34,6 +36,7 @@ class LLMService:
         ]
 
     async def handle_chat(self, payload: ChatPayload):
+        self.__init_conversation_history()
         image_content = None
         if payload.image:
             try:
@@ -60,8 +63,13 @@ class LLMService:
                 tokenize=True,
                 return_dict=True,
                 return_tensors="pt",
-                do_pan_and_scan=True
+                do_pan_and_scan=True,
+                padding="longest",
+                pad_to_multiple_of=8
             ).to(model.device)
+
+            processor.tokenizer.padding_side = "left"
+
             input_len = inputs["input_ids"].shape[-1]
             output_ids = model.generate(**inputs, max_new_tokens=2000)
             output_ids = output_ids[0][input_len:]
