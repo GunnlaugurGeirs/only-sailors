@@ -22,11 +22,11 @@ class GameService(ABC):
     @abstractmethod
     def process_output(self):
         raise NotImplementedError("Method not implemented")
-    
+
     @abstractmethod
     def parse_command(self, output):
         raise NotImplementedError("Method not implemented")
-    
+
     @abstractmethod
     def simulate_agent(self):
         raise NotImplementedError("Method not implemented")
@@ -41,7 +41,7 @@ class HTTPGameService(GameService):
 
     def process_output(self):
         return
-    
+
     def parse_command(self, output):
         """
         Parses the command from the given output string.
@@ -54,14 +54,15 @@ class HTTPGameService(GameService):
         closing_index = output.find(closing_tag)
         if closing_index == -1:
             raise ValueError("No closing </think> tag found in the output.")
-        
+
         # The command is everything after the closing tag
-        command = output[closing_index + len(closing_tag):].strip()
+        command = output[closing_index + len(closing_tag) :].strip()
         return command
 
     def simulate_agent(self):
         import base64, requests
         from io import BytesIO
+
         while True:
             image, collision = self.output_queue.get()
             # Assuming 'image' is your PIL Image object
@@ -70,7 +71,7 @@ class HTTPGameService(GameService):
             image_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
             payload = {
                 "text": "Here's an image of the current screen. Repeat out loud what your instructions are, then what you see in great detail, then decide what you want to do next. Make sure to follow your instructions, include your thought process in <think>!",
-                "image": image_data
+                "image": image_data,
             }
             response = requests.post("http://localhost:8000/chat", json=payload)
             # TODO: parse response
@@ -80,7 +81,7 @@ class HTTPGameService(GameService):
                 self.command_queue.put(key_map[command])
             except KeyError:
                 print("INVALID INPUT", command)
-            #time.sleep(5)
+            # time.sleep(5)
 
 
 class MockGameService(GameService):
@@ -104,6 +105,6 @@ class MockGameService(GameService):
 
     def parse_command(self, output):
         raise NotImplementedError("Method not implemented")
-    
+
     def simulate_agent(self):
         return

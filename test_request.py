@@ -1,5 +1,6 @@
 import requests
 import base64
+
 # Use the /chat endpoint instead of /predict
 url = "http://localhost:8000/chat"
 
@@ -8,7 +9,7 @@ prompt = "What does this image contain?"
 
 # URL of the image to be fetched
 # Cat
-#image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Cat_August_2010-4.jpg/960px-Cat_August_2010-4.jpg"
+# image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Cat_August_2010-4.jpg/960px-Cat_August_2010-4.jpg"
 
 # Pokemon red screenshot
 image_url = "https://cdn.mobygames.com/screenshots/15748095-pokemon-red-version-game-boy-danger-ahead-fat-boy.png"
@@ -21,10 +22,7 @@ else:
     print(f"Failed to download image: {response.status_code}")
     exit(1)
 
-payload = {
-    "text": prompt,
-    "image": image_data
-}
+payload = {"text": prompt, "image": image_data}
 
 response = requests.post(url, json=payload)
 
