@@ -1,107 +1,206 @@
 import base64
-import io
-import torch
-import traceback
-import copy
+from abc import ABC, abstractmethod
+from typing import Optional, List
+import uvicorn
+import threading
+import sys
+import select
+import tty
+import termios
+import signal
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-from PIL import Image
-from transformers import Gemma3ForConditionalGeneration, AutoProcessor
+import ollama
+import json
+import os
 
-# https://ai.google.dev/gemma/docs/capabilities/function-calling
+class ConversationMemory:
+    def __init__(self, max_tokens: int = 2048, token_multiplier: int = 4, pre_prompt: Optional[str] = None):
+        self.max_tokens = max_tokens
+        self.token_multiplier = token_multiplier
+        self.pre_prompt = pre_prompt
+        self.memory: List[dict] = []
+        
+        if pre_prompt:
+            self.memory.append({'role': 'system', 'content': pre_prompt})
+    
+    def add_exchange(self, user_prompt: str, model_response: str):
+        self.memory.append({'role': 'user', 'content': user_prompt})
+        self.memory.append({'role': 'assistant', 'content': model_response})
+        self._trim_memory()
+    
+    def _trim_memory(self):
+        while self._calculate_memory_size() > self.max_tokens:
+            if len(self.memory) > 1 and self.memory[0]['role'] == 'system':
+                if len(self.memory) >= 3:
+                    self.memory.pop(1)
+                    self.memory.pop(1)
+                else:
+                    break
+            else:
+                if len(self.memory) >= 2:
+                    self.memory.pop(0)
+                    self.memory.pop(0)
+                else:
+                    break
+    
+    def _calculate_memory_size(self) -> int:
+        total_chars = sum(len(msg['content']) for msg in self.memory)
+        return total_chars // self.token_multiplier
+    
+    def clear(self):
+        self.memory = []
+        if self.pre_prompt:
+            self.memory.append({'role': 'system', 'content': self.pre_prompt})
+        print("Memory cleared!")
+    
+    def get_context(self) -> List[dict]:
+        return self.memory
+    
+    def __str__(self) -> str:
+        """
+        Create a formatted string representation of the conversation memory
+        """
+        if not self.memory:
+            return "Memory is empty."
+        
+        formatted_memory = "Conversation Memory:\n"
+        formatted_memory += "=" * 50 + "\n"
+        
+        for i, message in enumerate(self.memory, 1):
+            role = message['role'].upper()
+            formatted_memory += f"{i}. [{role}]: {message['content']}\n"
+            formatted_memory += "-" * 50 + "\n"
+        
+        formatted_memory += f"\nTotal Messages: {len(self.memory)}\n"
+        formatted_memory += f"Estimated Token Count: {self._calculate_memory_size()}"
+        
+        return formatted_memory
 
-# Read pre-prompt from file
-with open("preprompt.txt", "r") as file:
-    PRE_PROMPT = file.read().strip()
+class LLMService(ABC):
+    @abstractmethod
+    def generate_response(self, prompt: str, image_data: Optional[bytes] = None):
+        pass
 
-
-class ChatPayload(BaseModel):
-    text: str
-    image: Optional[str] = None  # Base64-encoded image
-
-
-model_name = "google/gemma-3-4b-it"
-model = Gemma3ForConditionalGeneration.from_pretrained(
-    model_name, device_map="cuda", torch_dtype=torch.bfloat16
-)
-processor = AutoProcessor.from_pretrained(model_name)
-
-
-class LLMService:
-    def __init__(self):
-        self.__init_conversation_history()
-
-    def __init_conversation_history(self):
-        self.conversation_history: List[Dict[str, Any]] = [
-            {"role": "system", "content": [{"type": "text", "text": PRE_PROMPT}]}
-        ]
-
-    async def handle_chat(self, payload: ChatPayload):
-        self.__init_conversation_history()
-        image_content = None
-        if payload.image:
-            try:
-                image_data = base64.b64decode(payload.image)
-                img = Image.open(io.BytesIO(image_data))
-                image_content = {"type": "image", "image": img}
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid image data: {e}")
-
-        user_message_content = []
-        if image_content:
-            user_message_content.append(image_content)
-        user_message_content.append({"type": "text", "text": payload.text})
-
-        self.conversation_history.append(
-            {"role": "user", "content": user_message_content}
+class GemmaService(LLMService):
+    def __init__(self, 
+                 model: str = 'gemma3:4b', 
+                 context_size: int = 2048,
+                 pre_prompt_path: Optional[str] = None):
+        self.model = model
+        self.context_size = context_size
+        
+        # Read pre-prompt from file if path is provided
+        pre_prompt = None
+        if pre_prompt_path and os.path.exists(pre_prompt_path):
+            with open(pre_prompt_path, 'r') as f:
+                pre_prompt = f.read().strip()
+        
+        self.memory = ConversationMemory(
+            max_tokens=context_size, 
+            pre_prompt=pre_prompt
         )
-
+    
+    def generate_response(self, prompt: str, image_data: Optional[bytes] = None):
         try:
-            inputs = processor.apply_chat_template(
-                self.conversation_history,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                return_tensors="pt",
-                do_pan_and_scan=True,
-                padding="longest",
-                pad_to_multiple_of=8,
-            ).to(model.device)
-
-            processor.tokenizer.padding_side = "left"
-
-            input_len = inputs["input_ids"].shape[-1]
-            output_ids = model.generate(**inputs, max_new_tokens=2000)
-            output_ids = output_ids[0][input_len:]
-            assistant_response = processor.decode(
-                output_ids, skip_special_tokens=True, return_full_text=False
-            )
+            messages = self.memory.get_context() + [{'role': 'user', 'content': prompt}]
+            
+            if image_data:
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                messages[-1]['images'] = [image_base64]
+            
+            def generate():
+                full_response = ""
+                for chunk in ollama.chat(
+                    model=self.model, 
+                    messages=messages,
+                    stream=True,
+                    options={'num_ctx': self.context_size}
+                ):
+                    if chunk.get('message', {}).get('content'):
+                        response_chunk = chunk['message']['content']
+                        full_response += response_chunk
+                        yield json.dumps({"response": response_chunk}) + "\n"
+                
+                self.memory.add_exchange(prompt, full_response)
+            
+            return generate()
+        
         except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
-        # TODO: fix conversation history if above code fails
-        assistant_message = {
-            "role": "assistant",
-            "content": [{"type": "text", "text": assistant_response}],
-        }
-        self.conversation_history.append(assistant_message)
-        return assistant_response
+class ChatRequest(BaseModel):
+    prompt: str
+    image: Optional[str] = None
 
+app = FastAPI()
 
-LLM_SERVICE = LLMService()
+# Use pre-prompt from file in the same directory
+pre_prompt_path = os.path.join(os.path.dirname(__file__), 'preprompt.txt')
+llm_service = GemmaService(pre_prompt_path=pre_prompt_path, context_size=32768)
 
-# Initialize FastAPI
-APP = FastAPI(title="Conversational Gemma-3-4B-IT Pipeline Service")
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    try:
+        image_data = base64.b64decode(request.image) if request.image else None
+        
+        return StreamingResponse(
+            llm_service.generate_response(
+                prompt=request.prompt, 
+                image_data=image_data
+            ), 
+            media_type="text/event-stream"
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
+def is_data():
+    return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
-@APP.post("/chat")
-async def chat(payload: ChatPayload):
-    return await LLM_SERVICE.handle_chat(payload)
+# Global variable to store original terminal settings
+original_terminal_settings = None
 
+def save_terminal_settings():
+    global original_terminal_settings
+    original_terminal_settings = termios.tcgetattr(sys.stdin)
+
+def restore_terminal_settings(signum=None, frame=None):
+    global original_terminal_settings
+    if original_terminal_settings:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
+    sys.exit(0)
+
+def keyboard_handler():
+    try:
+        tty.setcbreak(sys.stdin.fileno())
+        while True:
+            if is_data():
+                c = sys.stdin.read(1)
+                if c == 'c':
+                    llm_service.memory.clear()
+                elif c == 'p':
+                    print(str(llm_service.memory))
+    finally:
+        restore_terminal_settings()
+
+def start_keyboard_thread():
+    keyboard_thread = threading.Thread(target=keyboard_handler, daemon=True)
+    keyboard_thread.start()
 
 if __name__ == "__main__":
+    # Save original terminal settings before modifying
+    save_terminal_settings()
+    
+    # Register signal handlers to restore terminal settings
+    signal.signal(signal.SIGINT, restore_terminal_settings)
+    signal.signal(signal.SIGTERM, restore_terminal_settings)
+    
+    start_keyboard_thread()
     import uvicorn
-
-    uvicorn.run(APP, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000
+    )

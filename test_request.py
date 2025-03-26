@@ -1,33 +1,73 @@
 import requests
 import base64
+import json
 
-# Use the /chat endpoint instead of /predict
-url = "http://localhost:8000/chat"
+def stream_chat_request(
+    prompt: str, 
+    image_path: str = None, 
+    url: str = "http://localhost:8000/chat"
+) -> str:
+    """
+    Stream chat request to the Gemma service
+    
+    Args:
+        prompt (str): Text prompt to send
+        image_path (Optional[str]): Path to image file
+        url (str): Endpoint URL
+    
+    Returns:
+        str: Full response from the service
+    """
+    # Prepare request payload
+    payload = {"prompt": prompt}
+    
+    # Handle optional image
+    if image_path:
+        with open(image_path, 'rb') as image_file:
+            image_bytes = image_file.read()
+            payload['image'] = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Send request
+    response = requests.post(url, json=payload, stream=True)
+    response.raise_for_status()
+    
+    # Collect response
+    full_response = ""
+    for line in response.iter_lines():
+        if line:
+            try:
+                # Decode and parse JSON
+                decoded_line = line.decode('utf-8')
+                json_response = json.loads(decoded_line)
+                
+                # Extract and print response
+                chunk = json_response.get('response', '')
+                print(chunk, end='', flush=True)
+                full_response += chunk
+            except json.JSONDecodeError:
+                print(f"Error decoding line: {line}")
+    
+    print()  # New line after response
+    return full_response
 
-# Example prompt text
-prompt = "What does this image contain?"
+def main():
+    """
+    Example usage of streaming chat request
+    """
+    # Example prompts
+    prompts = [
+        "Explain quantum computing in simple terms",
+        "Can you summarize our last conversation, but on the level of a 6-year old?"
+    ]
+    
+    for prompt in prompts:
+        print(f"\nPrompt: {prompt}")
+        print("Response: ", end='', flush=True)
+        
+        # Get streamed response
+        full_response = stream_chat_request(prompt)
+        print("\n\nFull Response:", full_response)
 
-# URL of the image to be fetched
-# Cat
-# image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Cat_August_2010-4.jpg/960px-Cat_August_2010-4.jpg"
-
-# Pokemon red screenshot
-image_url = "https://cdn.mobygames.com/screenshots/15748095-pokemon-red-version-game-boy-danger-ahead-fat-boy.png"
-
-# Fetch the image from the URL and encode it in base64
-response = requests.get(image_url)
-if response.ok:
-    image_data = base64.b64encode(response.content).decode("utf-8")
-else:
-    print(f"Failed to download image: {response.status_code}")
-    exit(1)
-
-payload = {"text": prompt, "image": image_data}
-
-response = requests.post(url, json=payload)
-
-if response.ok:
-    print("Response from server:", response.json())
-else:
-    print("Request failed with status code:", response.status_code)
-    print("Error message:", response.text)
+# Run the main function
+if __name__ == "__main__":
+    main()

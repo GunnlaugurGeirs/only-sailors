@@ -1,8 +1,14 @@
 from queue import Queue
 import time
 import threading
+import requests
+import base64
+import json
 from constants import key_map, get_random_key
 from abc import ABC, abstractmethod
+from PIL import Image
+from io import BytesIO
+import re
 
 
 class GameService(ABC):
@@ -42,42 +48,84 @@ class HTTPGameService(GameService):
     def process_output(self):
         return
 
-    def parse_command(self, output):
-        """
-        Parses the command from the given output string.
-        The expected format is:
-        <think>...internal reasoning...</think>COMMAND
-        where COMMAND is one of the key_map commands.
-        """
-        # Find the closing </think> tag
-        closing_tag = "</think>"
-        closing_index = output.find(closing_tag)
-        if closing_index == -1:
-            raise ValueError("No closing </think> tag found in the output.")
+    def encode_pil_image(self, pil_image: Image):
+        """Encode PIL Image to base64 string"""
+        buffered = BytesIO()
+        pil_image.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-        # The command is everything after the closing tag
-        command = output[closing_index + len(closing_tag) :].strip()
-        return command
+    def stream_chat_request(
+            self,
+            prompt: str, 
+            image: Image = None, 
+            url: str = "http://localhost:8000/chat"
+    ) -> str:
+        """
+        Stream chat request to the Gemma service
+        
+        Args:
+            prompt (str): Text prompt to send
+            image_path (Optional[str]): Path to image file
+            url (str): Endpoint URL
+        
+        Returns:
+            str: Full response from the service
+        """
+        # Prepare request payload
+        payload = {"prompt": prompt}
+        
+        # Handle optional image
+        if image is not None:
+            payload['image'] = self.encode_pil_image(image)
+        
+        # Send request
+        response = requests.post(url, json=payload, stream=True)
+        response.raise_for_status()
+            
+        # Collect response
+        full_response = ""
+        for line in response.iter_lines():
+            if line:
+                try:
+                    # Decode and parse JSON
+                    decoded_line = line.decode('utf-8')
+                    json_response = json.loads(decoded_line)
+                    
+                    # Extract and print response
+                    chunk = json_response.get('response', '')
+                    print(chunk, end='', flush=True)
+                    full_response += chunk
+                except json.JSONDecodeError:
+                    print(f"Error decoding line: {line}")
+        
+        print()  # New line after response
+        return full_response
+
+    def parse_command(self, model_output):
+        """
+        Parse the last occurrence of input function name and argument.
+        
+        Args:
+            model_output (str): The text output from the model
+        
+        Returns:
+            tuple or None: (function_name, argument), or None if no match found
+        """
+        
+        # Regex pattern to match function name and argument
+        pattern = r'(\w+)\(["\']([^"\']+)["\']\)'
+        
+        matches = list(re.finditer(pattern, model_output))
+        
+        return (matches[-1].group(1), matches[-1].group(2)) if matches else None
 
     def simulate_agent(self):
-        import base64, requests
-        from io import BytesIO
-
         while True:
             image, collision = self.output_queue.get()
-            # Assuming 'image' is your PIL Image object
-            buffered = BytesIO()
-            image.save(buffered, format="PNG")  # You can change the format if needed
-            image_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            payload = {
-                "text": "Here's an image of the current screen. Repeat out loud what your instructions are, then what you see in great detail, then decide what you want to do next. Make sure to follow your instructions, include your thought process in <think>!",
-                "image": image_data,
-            }
-            response = requests.post("http://localhost:8000/chat", json=payload)
-            # TODO: parse response
-            print(response.json())
+            prompt = "This is an image of your current screen. Give a short description of what you see and what your current goal is. Then, decide what you want to do next."
+            response = self.stream_chat_request(prompt, image)
             try:
-                command = self.parse_command(response.json())
+                command = self.parse_command(response)[1]
                 self.command_queue.put(key_map[command])
             except KeyError:
                 print("INVALID INPUT", command)
