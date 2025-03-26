@@ -61,7 +61,7 @@ class GameInstance:
 
 
 def get_game_service(game: GameInstance):
-    mock_service = read_config("Settings", "mock", default=True, value_type=bool)
+    mock_service = read_config("Settings", "mock_service", default=True, value_type=bool)
     return (
         MockGameService(game.command_queue, game.output_queue)
         if mock_service
