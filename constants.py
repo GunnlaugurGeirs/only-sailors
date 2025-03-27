@@ -1,5 +1,3 @@
-import random
-
 key_map = (
     "up",
     "down",
@@ -10,6 +8,3 @@ key_map = (
     "start",
     "select",
 )
-
-def get_random_key():
-    return random.choice(list(key_map))

@@ -4,9 +4,10 @@ import requests
 import base64
 import json
 import re
+import random
 
 from queue import Queue
-from constants import get_random_key
+from constants import key_map
 from abc import ABC, abstractmethod
 from PIL import Image
 from io import BytesIO
@@ -19,17 +20,7 @@ class GameService(ABC):
         self.data_queue = output_queue
 
     def start_game(self):
-        threading.Thread(target=self.process_output, daemon=True).start()
-        threading.Thread(target=self.read_input, daemon=True).start()
         threading.Thread(target=self.run_agent, daemon=True).start()
-
-    @abstractmethod
-    def read_input(self):
-        raise NotImplementedError("Method not implemented")
-
-    @abstractmethod
-    def process_output(self):
-        raise NotImplementedError("Method not implemented")
 
     @abstractmethod
     def parse_command(self, output):
@@ -41,14 +32,9 @@ class GameService(ABC):
 
 
 class HTTPGameService(GameService):
-    def __init__(self, command_queue: Queue, output_queue: Queue):
+    def __init__(self, command_queue: Queue, output_queue: Queue, url: str = "http://localhost:8000/chat"):
+        self.url = url
         super().__init__(command_queue, output_queue)
-
-    def read_input(self):
-        return
-
-    def process_output(self):
-        return
 
     def _encode_pil_image(self, pil_image: Image):
         """Encode PIL Image to base64 string"""
@@ -59,8 +45,7 @@ class HTTPGameService(GameService):
     def stream_chat_request(
             self,
             prompt: str, 
-            image: Image = None, 
-            url: str = "http://localhost:8000/chat"
+            image: Image = None,
     ) -> str:
         # Prepare request payload
         payload = {"prompt": prompt}
@@ -70,7 +55,7 @@ class HTTPGameService(GameService):
             payload['image'] = self._encode_pil_image(image)
         
         # Send request
-        response = requests.post(url, json=payload, stream=True)
+        response = requests.post(self.url, json=payload, stream=True)
         response.raise_for_status()
             
         # Collect response
@@ -105,7 +90,7 @@ class HTTPGameService(GameService):
     def run_agent(self):
         while True:
             image, collision = self.data_queue.get()
-            prompt = "This is an image of your current screen. Give a short description of what you see and what your current goal is. Then, decide what you want to do next."
+            prompt = "This is an image of your current screen. Compare and contrast it to your current screen and previous command, if any. Has your command had any effect on the game state? After you have compared and contrasted your current screen to your previous command, give a short description of what you see and what your current goal is. Then, decide what you want to do next."
             response = self.stream_chat_request(prompt, image)
             try:
                 command = self.parse_command(response)[1]
@@ -116,26 +101,14 @@ class HTTPGameService(GameService):
 
 
 class MockGameService(GameService):
-    def __init__(self, command_queue: Queue, output_queue: Queue):
-        super().__init__(command_queue, output_queue)
-
-    def read_input(self):
-        """Simulate random key inputs for mock purposes."""
-        while True:
-            if not self.command_queue.full():
-                key = get_random_key()
-                self.command_queue.put(key)
-                time.sleep(2)
-
-    def process_output(self):
-        """Simulate game output."""
-        while True:
-            if not self.data_queue.empty():
-                image, collision = self.data_queue.get()
-                time.sleep(5)
-
     def parse_command(self, output):
-        raise NotImplementedError("Method not implemented")
+        return random.choice(list(key_map))
 
     def run_agent(self):
-        return
+        while True:
+            image, collision = self.data_queue.get()
+            time.sleep(5) # Simulate the agent being slow
+            key = self.parse_command(None)
+            print(f"Key: {key}")
+            self.command_queue.put(key)
+            time.sleep(2)
