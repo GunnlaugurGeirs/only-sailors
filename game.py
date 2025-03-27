@@ -10,8 +10,8 @@ from game_service import MockGameService, HTTPGameService
 class GameInstance:
     def __init__(self, rom_path):
         self.pyboy = PyBoy(gamerom=rom_path, sound_emulated=False)
-        self.command_queue = Queue(maxsize=100) # Agent commands
-        self.data_queue = Queue(maxsize=1) # Game data for the agent to act on
+        self.command_queue = Queue(maxsize=100) # Agent commands. The agent may chain commands.
+        self.data_queue = Queue(maxsize=1) # Game data for the agent to act on.
         self.input_thread = None
         self.output_thread = None
         self.image = None
@@ -26,20 +26,20 @@ class GameInstance:
         self.start_output_thread()
         while self.pyboy.tick():
             if not self.command_queue.empty():
-                command = self.command_queue.get()
+                command = self.read_command()
                 if command == "EXIT":
                     break
                 self.pyboy.button(command)
 
         self.pyboy.stop()
 
-    def command(self, command):
+    def read_command(self):
+        command = self.command_queue.get()
         if command == "EXIT":
-            self.command_queue.put("EXIT")
-            return
+            return command
 
         if command in key_map:
-            self.command_queue.put(command)
+            return command
 
         raise ValueError(f"Invalid command: {command}")
 
