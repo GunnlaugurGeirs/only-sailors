@@ -18,6 +18,7 @@ class GameService(ABC):
     def __init__(self, command_queue: Queue, output_queue: Queue):
         self.command_queue = command_queue
         self.data_queue = output_queue
+        self._time_last_command = 0
 
     def start_game(self):
         threading.Thread(target=self.run_agent, daemon=True).start()
@@ -89,6 +90,8 @@ class HTTPGameService(GameService):
 
     def run_agent(self):
         while True:
+            if self._time_last_command > time.time() - 5:
+                continue
             image, collision = self.data_queue.get()
             prompt = "This is an image of your current screen. Compare and contrast it to your current screen and previous command, if any. Has your command had any effect on the game state? After you have compared and contrasted your current screen to your previous command, give a short description of what you see and what your current goal is. Then, decide what you want to do next."
             response = self.stream_chat_request(prompt, image)
@@ -98,6 +101,7 @@ class HTTPGameService(GameService):
             except KeyError:
                 # TODO: we should inform the LLM when it does an oopsie
                 print("INVALID INPUT", command)
+            self._time_last_command = time.time()
 
 
 class MockGameService(GameService):

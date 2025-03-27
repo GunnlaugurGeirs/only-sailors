@@ -17,7 +17,7 @@ class GameInstance:
         self.image = None
         self.image_lock = threading.Lock()
         self.capture_speed = read_config(
-            "Settings", "capture_speed", default=5, value_type=int
+            "Settings", "capture_speed", default=1, value_type=int
         )
 
     def run(self):
