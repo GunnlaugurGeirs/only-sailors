@@ -19,7 +19,7 @@ class GameService(ABC):
     def start_game(self):
         threading.Thread(target=self.process_output, daemon=True).start()
         threading.Thread(target=self.read_input, daemon=True).start()
-        threading.Thread(target=self.simulate_agent, daemon=True).start()
+        threading.Thread(target=self.run_agent, daemon=True).start()
 
     @abstractmethod
     def read_input(self):
@@ -34,7 +34,7 @@ class GameService(ABC):
         raise NotImplementedError("Method not implemented")
 
     @abstractmethod
-    def simulate_agent(self):
+    def run_agent(self):
         raise NotImplementedError("Method not implemented")
 
 
@@ -48,7 +48,7 @@ class HTTPGameService(GameService):
     def process_output(self):
         return
 
-    def encode_pil_image(self, pil_image: Image):
+    def _encode_pil_image(self, pil_image: Image):
         """Encode PIL Image to base64 string"""
         buffered = BytesIO()
         pil_image.save(buffered, format="PNG")
@@ -76,7 +76,7 @@ class HTTPGameService(GameService):
         
         # Handle optional image
         if image is not None:
-            payload['image'] = self.encode_pil_image(image)
+            payload['image'] = self._encode_pil_image(image)
         
         # Send request
         response = requests.post(url, json=payload, stream=True)
@@ -119,7 +119,7 @@ class HTTPGameService(GameService):
         
         return (matches[-1].group(1), matches[-1].group(2)) if matches else None
 
-    def simulate_agent(self):
+    def run_agent(self):
         while True:
             image, collision = self.output_queue.get()
             prompt = "This is an image of your current screen. Give a short description of what you see and what your current goal is. Then, decide what you want to do next."
@@ -129,7 +129,6 @@ class HTTPGameService(GameService):
                 self.command_queue.put(key_map[command])
             except KeyError:
                 print("INVALID INPUT", command)
-            # time.sleep(5)
 
 
 class MockGameService(GameService):
@@ -154,5 +153,5 @@ class MockGameService(GameService):
     def parse_command(self, output):
         raise NotImplementedError("Method not implemented")
 
-    def simulate_agent(self):
+    def run_agent(self):
         return
