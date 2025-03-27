@@ -95,18 +95,30 @@ class WebService:
         )
 
 def main():
+    # TODO: classes here should have builders which read config.
+
+    # Get model name and size from config file
+    model_name = read_config("Agent", "model_name", default="gemma3", value_type=str)
+    model_size = read_config("Agent", "model_size", default="4b", value_type=str)
+    model = f"{model_name}:{model_size}"
+
     # Get preprompt filename
-    pre_prompt = read_config("Agent", "pre_prompt", default="preprompt.txt")
+    pre_prompt = read_config("Agent", "pre_prompt", default="preprompt.txt", value_type=str)
 
     # Construct path to preprompt.txt relative to this file
     pre_prompt_path = os.path.join(os.path.dirname(__file__), pre_prompt)
-        
+
     # Create LLM Agent
-    llm_agent = GemmaAgent(pre_prompt_path=pre_prompt_path)
+    context_size = read_config("Agent", "context_size", default=2048, value_type=int)
+    llm_agent = GemmaAgent(
+        model=model,
+        pre_prompt_path=pre_prompt_path,
+        context_size=context_size
+    )
     
     # Create and run web service
-    host = read_config("Agent", "host", default="0.0.0.0") 
-    port = read_config("Agent", "port", default=8000)
+    host = read_config("Agent", "host", default="0.0.0.0", value_type=str) 
+    port = read_config("Agent", "port", default=8000, value_type=int)
     web_service = WebService(llm_agent)
     web_service.run(host=host, port=port)
 
