@@ -1,16 +1,15 @@
 import random
 
-key_map = {
-    "UP": "up",
-    "DOWN": "down",
-    "LEFT": "left",
-    "RIGHT": "right",
-    "A": "a",
-    "B": "b",
-    "START": "start",
-    "SELECT": "select",
-}
+key_map = (
+    "up",
+    "down",
+    "left",
+    "right",
+    "a",
+    "b",
+    "start",
+    "select",
+)
 
-
-def get_random_key(key_map):
-    return random.choice(list(key_map.keys()))
+def get_random_key():
+    return random.choice(list(key_map))

@@ -39,8 +39,9 @@ class GameInstance:
             return
 
         if command in key_map:
-            button = key_map[command]
-            self.command_queue.put(button)
+            self.command_queue.put(command)
+
+        raise ValueError(f"Invalid command: {command}")
 
     def start_output_thread(self):
         self.output_thread = threading.Thread(target=self.capture_image, daemon=True)

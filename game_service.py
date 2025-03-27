@@ -1,20 +1,22 @@
-from queue import Queue
 import time
 import threading
 import requests
 import base64
 import json
-from constants import key_map, get_random_key
+import re
+
+from queue import Queue
+from constants import get_random_key
 from abc import ABC, abstractmethod
 from PIL import Image
 from io import BytesIO
-import re
+from typing import Tuple
 
 
 class GameService(ABC):
     def __init__(self, command_queue: Queue, output_queue: Queue):
         self.command_queue = command_queue
-        self.output_queue = output_queue
+        self.data_queue = output_queue
 
     def start_game(self):
         threading.Thread(target=self.process_output, daemon=True).start()
@@ -60,17 +62,6 @@ class HTTPGameService(GameService):
             image: Image = None, 
             url: str = "http://localhost:8000/chat"
     ) -> str:
-        """
-        Stream chat request to the Gemma service
-        
-        Args:
-            prompt (str): Text prompt to send
-            image_path (Optional[str]): Path to image file
-            url (str): Endpoint URL
-        
-        Returns:
-            str: Full response from the service
-        """
         # Prepare request payload
         payload = {"prompt": prompt}
         
@@ -101,33 +92,26 @@ class HTTPGameService(GameService):
         print()  # New line after response
         return full_response
 
-    def parse_command(self, model_output):
-        """
-        Parse the last occurrence of input function name and argument.
-        
-        Args:
-            model_output (str): The text output from the model
-        
-        Returns:
-            tuple or None: (function_name, argument), or None if no match found
-        """
-        
+    def parse_command(self, model_output: str) -> Tuple:
         # Regex pattern to match function name and argument
         pattern = r'(\w+)\(["\']([^"\']+)["\']\)'
-        
         matches = list(re.finditer(pattern, model_output))
         
-        return (matches[-1].group(1), matches[-1].group(2)) if matches else None
+        if not matches:
+            raise ValueError(f"Could not find a function call in {model_output}")
+
+        return (matches[-1].group(1), matches[-1].group(2))
 
     def run_agent(self):
         while True:
-            image, collision = self.output_queue.get()
+            image, collision = self.data_queue.get()
             prompt = "This is an image of your current screen. Give a short description of what you see and what your current goal is. Then, decide what you want to do next."
             response = self.stream_chat_request(prompt, image)
             try:
                 command = self.parse_command(response)[1]
-                self.command_queue.put(key_map[command])
+                self.command_queue.put(command)
             except KeyError:
+                # TODO: we should inform the LLM when it does an oopsie
                 print("INVALID INPUT", command)
 
 
@@ -139,15 +123,15 @@ class MockGameService(GameService):
         """Simulate random key inputs for mock purposes."""
         while True:
             if not self.command_queue.full():
-                key = get_random_key(key_map)
+                key = get_random_key()
                 self.command_queue.put(key)
                 time.sleep(2)
 
     def process_output(self):
         """Simulate game output."""
         while True:
-            if not self.output_queue.empty():
-                image, collision = self.output_queue.get()
+            if not self.data_queue.empty():
+                image, collision = self.data_queue.get()
                 time.sleep(5)
 
     def parse_command(self, output):
