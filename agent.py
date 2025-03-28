@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from typing import Optional
 import base64
 import ollama
@@ -8,17 +7,14 @@ import os
 
 from conversation_memory import ConversationMemory
 
-class LLMAgent(ABC):
-    @abstractmethod
-    def generate_response(self, prompt: str, image_data: Optional[bytes] = None):
-        raise NotImplementedError("Method not implemented")
-
-class GemmaAgent(LLMAgent):
+class LLMAgent:
     def __init__(self, 
-                 model: str = 'gemma3:4b', 
+                 model: str, 
                  context_size: int = 2048,
-                 pre_prompt_path: Optional[str] = None):
+                 pre_prompt_path: Optional[str] = None,
+                 image_model: Optional[str] = None):
         self.model = model
+        self.image_model = image_model
         self.context_size = context_size
 
         # Read pre-prompt from file if path is provided
@@ -36,9 +32,22 @@ class GemmaAgent(LLMAgent):
     
     def generate_response(self, prompt: str, image_data: Optional[bytes] = None):
         try:
+            # If an image model is provided, use it to process image data
+            # TODO: image_prompt and image_model num_ctx should be configurable
+            if image_data and self.image_model:
+                image_prompt = 'Describe the image'
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                image_to_text_response = ollama.chat(
+                    model=self.image_model, 
+                    messages=[{'role': 'user', 'content': image_prompt, 'images': [image_data]}],
+                    #options={'num_ctx': self.context_size,}
+                )
+
+                prompt += " " + image_to_text_response['message']['content']
+
             messages = self.memory.get_context() + [{'role': 'user', 'content': prompt}]
             
-            if image_data:
+            if image_data and not self.image_model:
                 image_base64 = base64.b64encode(image_data).decode('utf-8')
                 messages[-1]['images'] = [image_base64]
             

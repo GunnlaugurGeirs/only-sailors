@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from agent import GemmaAgent
+from agent import LLMAgent
 from config import read_config
 
 class ChatRequest(BaseModel):
@@ -98,9 +98,10 @@ def main():
     # TODO: classes here should have builders which read config.
 
     # Get model name and size from config file
-    model_name = read_config("Agent", "model_name", default="gemma3", value_type=str)
-    model_size = read_config("Agent", "model_size", default="4b", value_type=str)
-    model = f"{model_name}:{model_size}"
+    model = read_config("Agent", "model", default="gemma3:4b", value_type=str)
+
+    # Optional text model, for non multi-modal models that can't handle images.
+    image_model = read_config("Agent", "image_model", default=None, value_type=str)
 
     # Get preprompt filename
     pre_prompt = read_config("Agent", "pre_prompt", default="preprompt.txt", value_type=str)
@@ -110,10 +111,11 @@ def main():
 
     # Create LLM Agent
     context_size = read_config("Agent", "context_size", default=2048, value_type=int)
-    llm_agent = GemmaAgent(
+    llm_agent = LLMAgent(
         model=model,
         pre_prompt_path=pre_prompt_path,
-        context_size=context_size
+        context_size=context_size,
+        image_model=image_model
     )
     
     # Create and run web service
