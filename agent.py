@@ -11,7 +11,7 @@ from conversation_memory import ConversationMemory
 class LLMAgent(ABC):
     @abstractmethod
     def generate_response(self, prompt: str, image_data: Optional[bytes] = None):
-        pass
+        raise NotImplementedError("Method not implemented")
 
 class GemmaAgent(LLMAgent):
     def __init__(self, 
@@ -20,12 +20,14 @@ class GemmaAgent(LLMAgent):
                  pre_prompt_path: Optional[str] = None):
         self.model = model
         self.context_size = context_size
-        
+
         # Read pre-prompt from file if path is provided
         pre_prompt = None
         if pre_prompt_path and os.path.exists(pre_prompt_path):
             with open(pre_prompt_path, 'r') as f:
                 pre_prompt = f.read().strip()
+        elif pre_prompt_path:
+            raise FileNotFoundError(f"Pre-prompt file not found at {pre_prompt_path}")
         
         self.memory = ConversationMemory(
             max_tokens=context_size, 

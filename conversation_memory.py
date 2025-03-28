@@ -18,17 +18,15 @@ class ConversationMemory:
     def _trim_memory(self):
         while self._calculate_memory_size() > self.max_tokens:
             if len(self.memory) > 1 and self.memory[0]['role'] == 'system':
-                if len(self.memory) >= 3:
-                    self.memory.pop(1)
-                    self.memory.pop(1)
-                else:
+                if len(self.memory) < 3:
                     break
+                self.memory.pop(1)
+                self.memory.pop(1)
             else:
-                if len(self.memory) >= 2:
-                    self.memory.pop(0)
-                    self.memory.pop(0)
-                else:
+                if len(self.memory) < 2:
                     break
+                self.memory.pop(0)
+                self.memory.pop(0)
     
     def _calculate_memory_size(self) -> int:
         total_chars = sum(len(msg['content']) for msg in self.memory)
