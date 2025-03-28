@@ -1,54 +1,43 @@
-from queue import Queue
 import time
 import threading
 import requests
 import base64
 import json
-from constants import key_map, get_random_key
+import re
+import random
+
+from queue import Queue
+from constants import key_map
 from abc import ABC, abstractmethod
 from PIL import Image
 from io import BytesIO
-import re
+from typing import Tuple
 
 
 class GameService(ABC):
     def __init__(self, command_queue: Queue, output_queue: Queue):
         self.command_queue = command_queue
-        self.output_queue = output_queue
+        self.data_queue = output_queue
+        self._time_last_command = 0
 
     def start_game(self):
-        threading.Thread(target=self.process_output, daemon=True).start()
-        threading.Thread(target=self.read_input, daemon=True).start()
-        threading.Thread(target=self.simulate_agent, daemon=True).start()
-
-    @abstractmethod
-    def read_input(self):
-        raise NotImplementedError("Method not implemented")
-
-    @abstractmethod
-    def process_output(self):
-        raise NotImplementedError("Method not implemented")
+        threading.Thread(target=self.run_agent, daemon=True).start()
 
     @abstractmethod
     def parse_command(self, output):
         raise NotImplementedError("Method not implemented")
 
     @abstractmethod
-    def simulate_agent(self):
+    def run_agent(self):
         raise NotImplementedError("Method not implemented")
 
 
 class HTTPGameService(GameService):
-    def __init__(self, command_queue: Queue, output_queue: Queue):
+    def __init__(self, command_queue: Queue, output_queue: Queue, url: str = "http://localhost:8000/chat"):
+        self.url = url
         super().__init__(command_queue, output_queue)
 
-    def read_input(self):
-        return
-
-    def process_output(self):
-        return
-
-    def encode_pil_image(self, pil_image: Image):
+    def _encode_pil_image(self, pil_image: Image):
         """Encode PIL Image to base64 string"""
         buffered = BytesIO()
         pil_image.save(buffered, format="PNG")
@@ -57,29 +46,17 @@ class HTTPGameService(GameService):
     def stream_chat_request(
             self,
             prompt: str, 
-            image: Image = None, 
-            url: str = "http://localhost:8000/chat"
+            image: Image = None,
     ) -> str:
-        """
-        Stream chat request to the Gemma service
-        
-        Args:
-            prompt (str): Text prompt to send
-            image_path (Optional[str]): Path to image file
-            url (str): Endpoint URL
-        
-        Returns:
-            str: Full response from the service
-        """
         # Prepare request payload
         payload = {"prompt": prompt}
         
         # Handle optional image
         if image is not None:
-            payload['image'] = self.encode_pil_image(image)
+            payload['image'] = self._encode_pil_image(image)
         
         # Send request
-        response = requests.post(url, json=payload, stream=True)
+        response = requests.post(self.url, json=payload, stream=True)
         response.raise_for_status()
             
         # Collect response
@@ -101,58 +78,41 @@ class HTTPGameService(GameService):
         print()  # New line after response
         return full_response
 
-    def parse_command(self, model_output):
-        """
-        Parse the last occurrence of input function name and argument.
-        
-        Args:
-            model_output (str): The text output from the model
-        
-        Returns:
-            tuple or None: (function_name, argument), or None if no match found
-        """
-        
+    def parse_command(self, model_output: str) -> Tuple:
         # Regex pattern to match function name and argument
         pattern = r'(\w+)\(["\']([^"\']+)["\']\)'
-        
         matches = list(re.finditer(pattern, model_output))
         
-        return (matches[-1].group(1), matches[-1].group(2)) if matches else None
+        if not matches:
+            raise ValueError(f"Could not find a function call in {model_output}")
 
-    def simulate_agent(self):
+        return (matches[-1].group(1), matches[-1].group(2))
+
+    def run_agent(self):
         while True:
-            image, collision = self.output_queue.get()
-            prompt = "This is an image of your current screen. Give a short description of what you see and what your current goal is. Then, decide what you want to do next."
+            if self._time_last_command > time.time() - 5:
+                continue
+            image, collision = self.data_queue.get()
+            prompt = "This is an image of your current screen. Compare and contrast it to your current screen and previous command, if any. Has your command had any effect on the game state? After you have compared and contrasted your current screen to your previous command, give a short description of what you see and what your current goal is. Then, decide what you want to do next."
             response = self.stream_chat_request(prompt, image)
             try:
                 command = self.parse_command(response)[1]
-                self.command_queue.put(key_map[command])
+                self.command_queue.put(command)
             except KeyError:
+                # TODO: we should inform the LLM when it does an oopsie
                 print("INVALID INPUT", command)
-            # time.sleep(5)
+            self._time_last_command = time.time()
 
 
 class MockGameService(GameService):
-    def __init__(self, command_queue: Queue, output_queue: Queue):
-        super().__init__(command_queue, output_queue)
-
-    def read_input(self):
-        """Simulate random key inputs for mock purposes."""
-        while True:
-            if not self.command_queue.full():
-                key = get_random_key(key_map)
-                self.command_queue.put(key)
-                time.sleep(2)
-
-    def process_output(self):
-        """Simulate game output."""
-        while True:
-            if not self.output_queue.empty():
-                image, collision = self.output_queue.get()
-                time.sleep(5)
-
     def parse_command(self, output):
-        raise NotImplementedError("Method not implemented")
+        return random.choice(list(key_map))
 
-    def simulate_agent(self):
-        return
+    def run_agent(self):
+        while True:
+            image, collision = self.data_queue.get()
+            time.sleep(5) # Simulate the agent being slow
+            key = self.parse_command(None)
+            print(f"Key: {key}")
+            self.command_queue.put(key)
+            time.sleep(2)
