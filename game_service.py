@@ -89,8 +89,6 @@ class HTTPGameService(GameService):
         return (matches[-1].group(1), matches[-1].group(2))
 
     def run_agent(self):
-        if self._time_last_command > time.time() - 5:
-            return
         image, collision = self.data_queue.get()
         prompt = "This is an image of your current screen. Compare and contrast it to your current screen and previous command, if any. Has your command had any effect on the game state? After you have compared and contrasted your current screen to your previous command, give a short description of what you see and what your current goal is. Then, decide what you want to do next."
         response = self.stream_chat_request(prompt, image)
