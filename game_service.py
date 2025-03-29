@@ -1,5 +1,4 @@
 import time
-import threading
 import requests
 import base64
 import json
@@ -21,7 +20,8 @@ class GameService(ABC):
         self._time_last_command = 0
 
     def start_game(self):
-        threading.Thread(target=self.run_agent, daemon=True).start()
+        while True:
+            self.run_agent()
 
     @abstractmethod
     def parse_command(self, output):
@@ -89,19 +89,16 @@ class HTTPGameService(GameService):
         return (matches[-1].group(1), matches[-1].group(2))
 
     def run_agent(self):
-        while True:
-            if self._time_last_command > time.time() - 5:
-                continue
-            image, collision = self.data_queue.get()
-            prompt = "This is an image of your current screen. Compare and contrast it to your current screen and previous command, if any. Has your command had any effect on the game state? After you have compared and contrasted your current screen to your previous command, give a short description of what you see and what your current goal is. Then, decide what you want to do next."
-            response = self.stream_chat_request(prompt, image)
-            try:
-                command = self.parse_command(response)[1]
-                self.command_queue.put(command)
-            except KeyError:
-                # TODO: we should inform the LLM when it does an oopsie
-                print("INVALID INPUT", command)
-            self._time_last_command = time.time()
+        image, collision = self.data_queue.get()
+        prompt = "This is an image of your current screen. Compare and contrast it to your current screen and previous command, if any. Has your command had any effect on the game state? After you have compared and contrasted your current screen to your previous command, give a short description of what you see and what your current goal is. Then, decide what you want to do next."
+        response = self.stream_chat_request(prompt, image)
+        try:
+            command = self.parse_command(response)[1]
+            self.command_queue.put(command)
+        except KeyError:
+            # TODO: we should inform the LLM when it does an oopsie
+            print("INVALID INPUT", command)
+        self._time_last_command = time.time()
 
 
 class MockGameService(GameService):
@@ -109,10 +106,8 @@ class MockGameService(GameService):
         return random.choice(list(key_map))
 
     def run_agent(self):
-        while True:
-            image, collision = self.data_queue.get()
-            time.sleep(5) # Simulate the agent being slow
-            key = self.parse_command(None)
-            print(f"Key: {key}")
-            self.command_queue.put(key)
-            time.sleep(2)
+        image, collision = self.data_queue.get()
+        time.sleep(1) # Simulate the agent needing some thinking time
+        key = self.parse_command(None)
+        print(f"Key: {key}")
+        self.command_queue.put(key)
