@@ -43,14 +43,11 @@ class GameInstance:
         raise ValueError(f"Invalid command: {command}")
 
     def capture_image(self):
-        import time
-        t1 = time.time()
         if self.data_queue.empty():
             self.image = self.pyboy.screen.image.copy()
             self.data_queue.put(
                 (self.image, self.pyboy.game_wrapper.game_area_collision())
             )
-            print(time.time() - t1)
 
     def get_output(self):
         return self.image, self.pyboy.game_wrapper.game_area_collision()
