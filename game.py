@@ -16,19 +16,24 @@ class GameInstance:
     def run(self):
         game_speed = read_config("Settings", "game_speed", default=1, value_type=int)
         self.pyboy.set_emulation_speed(target_speed=game_speed)
-        tick = 0
+
+        ticks = 0
+        ticks_to_data = 300 # Set to get an initial image
         while self.pyboy.tick():
-            tick += 1
             if not self.command_queue.empty():
                 command = self.read_command()
                 if command == "EXIT":
                     break
                 self.pyboy.button(command)
-                tick = 0
+                ticks_to_data = 300
+                
+            if ticks_to_data:
+                ticks += 1
 
-            if tick % 300 == 0:
-                self.capture_image()
-                tick = 0
+                if ticks >= ticks_to_data:
+                    self.capture_game_state()
+                    ticks_to_data = 0
+                    ticks = 0
 
         self.pyboy.stop()
 
@@ -42,7 +47,11 @@ class GameInstance:
 
         raise ValueError(f"Invalid command: {command}")
 
-    def capture_image(self):
+    def capture_game_state(self):
+        """
+        This method should all-encompassing, pushing information about the state of the game.
+        TODO: implement more hooks
+        """
         if self.data_queue.empty():
             self.image = self.pyboy.screen.image.copy()
             self.data_queue.put(

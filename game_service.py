@@ -107,8 +107,7 @@ class MockGameService(GameService):
 
     def run_agent(self):
         image, collision = self.data_queue.get()
-        time.sleep(5) # Simulate the agent being slow
+        time.sleep(1) # Simulate the agent needing some thinking time
         key = self.parse_command(None)
         print(f"Key: {key}")
         self.command_queue.put(key)
-        time.sleep(2)
