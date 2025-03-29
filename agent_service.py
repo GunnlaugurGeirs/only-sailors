@@ -7,6 +7,7 @@ import termios
 import threading
 import signal
 import uvicorn
+import asyncio
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -26,7 +27,7 @@ class WebService:
         self.llm_agent = llm_agent
         
         # Store original terminal settings
-        self.original_terminal_settings = None
+        self.original_terminal_settings = termios.tcgetattr(sys.stdin)
         
         self.setup_routes()
     
@@ -46,46 +47,49 @@ class WebService:
             
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
-    
-    def save_terminal_settings(self):
-        self.original_terminal_settings = termios.tcgetattr(sys.stdin)
-    
+
     def restore_terminal_settings(self, *args, **kwargs):
-        # Otherwise your terminal will break on exit ;^)
-        if self.original_terminal_settings:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.original_terminal_settings)
-        sys.exit(0)
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.original_terminal_settings)
+        exit(0)
     
-    def is_data(self):
-        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
-    
-    def keyboard_handler(self):
+    async def async_keyboard_handler(self):
+        loop = asyncio.get_running_loop()
         try:
             tty.setcbreak(sys.stdin.fileno())
             while True:
-                if self.is_data():
-                    c = sys.stdin.read(1)
-                    if c == 'c':
-                        self.llm_agent.memory.clear()
-                    elif c == 'p':
-                        print(str(self.llm_agent.memory))
+                # Create a Future that will be set when a key is pressed
+                fut = loop.create_future()
+
+                # Register a reader callback to set the future's result when data is available
+                loop.add_reader(sys.stdin, lambda: fut.set_result(sys.stdin.read(1)))
+
+                # Wait asynchronously until a key is pressed
+                c = await fut
+
+                # Remove the reader to avoid duplicate callbacks
+                loop.remove_reader(sys.stdin)
+
+                if c == 'c':
+                    # For example, clear memory or perform any other operation
+                    self.llm_agent.memory_clear()
+                elif c == 'p':
+                    print(str(self.llm_agent.memory))
         finally:
             self.restore_terminal_settings()
-    
-    def start_keyboard_thread(self):
-        keyboard_thread = threading.Thread(target=self.keyboard_handler, daemon=True)
-        keyboard_thread.start()
+
+    def start_keyboard_handler(self):
+        threading.Thread(
+            target=lambda: asyncio.run(self.async_keyboard_handler()),
+            daemon=True
+        ).start()
     
     def run(self, host: str, port):
-        # Save original terminal settings
-        self.save_terminal_settings()
-        
         # Register signal handlers to restore terminal settings
         signal.signal(signal.SIGINT, self.restore_terminal_settings)
         signal.signal(signal.SIGTERM, self.restore_terminal_settings)
         
         # Start keyboard monitoring thread
-        self.start_keyboard_thread()
+        self.start_keyboard_handler()
         
         # Run the server
         uvicorn.run(
