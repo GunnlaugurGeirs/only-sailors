@@ -71,7 +71,7 @@ class WebService:
 
                 if c == 'c':
                     # For example, clear memory or perform any other operation
-                    self.llm_agent.memory_clear()
+                    self.llm_agent.memory.clear()
                 elif c == 'p':
                     print(str(self.llm_agent.memory))
         finally:
