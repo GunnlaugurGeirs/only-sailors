@@ -36,8 +36,8 @@ When the game begins, you will likely see a blank or empty screen. This is due t
 
 Tips and tricks:
     * Navigate in the world using the directional keys.
-    * Press "a" to confirm and action, as well as to speak with people in the world.
-    * "start" opens your main menu.
+    * Press "a" to confirm actions, as well as to speak with people in the world. "a" will get you through most conversations.
+    * "start" opens your main menu. It can also confirm in certain menus.
     * Navigate through menus using the "up" and "down" keys! Sometimes, menus allow you to use "left" and "right" as well.
     * If you find yourself repeating the same action over and over again, reflect on why you're not making any progress. Perhaps a change of thinking is in order?
 
